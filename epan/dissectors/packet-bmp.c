@@ -15,6 +15,7 @@
  * RFC9069 Support for Local RIB in BGP Monitoring Protocol (BMP)
  * draft-xu-grow-bmp-route-policy-attr-trace-04 BGP Route Policy and Attribute Trace Using BMP
  * draft-ietf-grow-bmp-tlv-13 BMP v4: TLV support for BMP Route Monitoring and Peer Down Messages
+ * draft-ietf-grow-bmp-path-marking-tlv-02: BMP Extension for Path Status TLV
  */
 
 #include "config.h"
@@ -131,11 +132,14 @@ void proto_reg_handoff_bmp(void);
 #define BMPv4_TLV_TYPE_GROUP                  0x05
 #define BMPv4_TLV_TYPE_BGP_CAP_ADDPATH        0x06
 #define BMPv4_TLV_TYPE_BGP_CAP_MULTIPLE_LBL   0x07
+#define BMPv4_TLV_TYPE_BGP_PATH_STATUS        0x09
 
 /* BMP draft-item-grow-bmp-tlv TLV Lengths */
 #define BMPv4_TLV_LENGTH_BGP_CAPABILITY             0x01
 #define BMPv4_TLV_LENGTH_GROUP_ITEM                 0x02
 #define BMPv4_TLV_LENGTH_VRF_TABLE_NAME_MAX_LENGTH  0xFF
+#define BMPv4_TLV_LENGTH_PATH_STATUS_STATUS_LENGTH  0x04
+#define BMPv4_TLV_LENGTH_PATH_STATUS_REASON_LENGTH  0x02
 
 static const value_string bmp_typevals[] = {
     { BMP_MSG_TYPE_ROUTE_MONITORING,    "Route Monitoring" },
@@ -241,6 +245,56 @@ static const value_string bmpv4_tlv_typevals[] = {
         { BMPv4_TLV_TYPE_VRF_TABLE_NAME,         "VRF/Table Name" },
         { BMPv4_TLV_TYPE_BGP_CAP_ADDPATH,        "BGP Add-Path Capability" },
         { BMPv4_TLV_TYPE_BGP_CAP_MULTIPLE_LBL,   "BGP Multi-Label Capability" },
+        { BMPv4_TLV_TYPE_BGP_PATH_STATUS,        "BGP Path Status" },
+        { 0, NULL }
+};
+
+
+enum bmp_path_status {
+    bmp_path_status_reserved	    = 0x00000000,
+    bmp_path_status_invalid		    = 0x00000001,
+    bmp_path_status_best		    = 0x00000002,
+    bmp_path_status_non_selected	= 0x00000004,
+    bmp_path_status_primary		    = 0x00000008,
+    bmp_path_status_backup		    = 0x00000010,
+    bmp_path_status_non_installed	= 0x00000020,
+    bmp_path_status_best_external	= 0x00000040,
+    bmp_path_status_addpath		    = 0x00000080,
+    bmp_path_status_filtered_in	    = 0x00000100,
+    bmp_path_status_filtered_out	= 0x00000200,
+    bmp_path_status_invalid_rov	    = 0x00000400,
+};
+
+enum bmp_path_status_reason {
+
+    bmp_path_status_reason_reserved					                = 0x0000,
+    bmp_path_status_reason_invalid_for_AS_loop			            = 0x0001,
+    bmp_path_status_reason_invalid_for_unresolvable_nexthop        	= 0x0002,
+    bmp_path_status_reason_not_preferred_for_Local_preference      	= 0x0003,
+    bmp_path_status_reason_not_preferred_for_AS_Path_Length        	= 0x0004,
+    bmp_path_status_reason_not_preferred_for_origin                	= 0x0005,
+    bmp_path_status_reason_not_preferred_for_MED                   	= 0x0006,
+    bmp_path_status_reason_not_preferred_for_peer_type             	= 0x0007,
+    bmp_path_status_reason_not_preferred_for_IGP_cost              	= 0x0008,
+    bmp_path_status_reason_not_preferred_for_router_ID             	= 0x0009,
+    bmp_path_status_reason_not_preferred_for_peer_address          	= 0x000A,
+    bmp_path_status_reason_not_preferred_for_AIGP	                = 0x000B
+};
+
+static const value_string bmpv4_tlv_path_status_reason_typevals[] = {
+
+        { bmp_path_status_reason_reserved,					             "Reserved" },
+        { bmp_path_status_reason_invalid_for_AS_loop,			         "Invalid for AS Loop" },
+        { bmp_path_status_reason_invalid_for_unresolvable_nexthop,       "Invalid for unresolvable nexthop" },
+        { bmp_path_status_reason_not_preferred_for_Local_preference,     "Not Preferred for Local Preference" },
+        { bmp_path_status_reason_not_preferred_for_AS_Path_Length,       "Not Preferred for AS Path Length" },
+        { bmp_path_status_reason_not_preferred_for_origin,               "Not Preferred for Origin" },
+        { bmp_path_status_reason_not_preferred_for_MED,                  "Not Preferred for MED" },
+        { bmp_path_status_reason_not_preferred_for_peer_type,            "Not Preferred for Peer Type" },
+        { bmp_path_status_reason_not_preferred_for_IGP_cost,             "Not Preferred for IGP Cost" },
+        { bmp_path_status_reason_not_preferred_for_router_ID,            "Not Preferred for Router ID" },
+        { bmp_path_status_reason_not_preferred_for_peer_address,         "Not Preferred for Peer Address" },
+        { bmp_path_status_reason_not_preferred_for_AIGP,                 "Not Preferred for AIGP" },
         { 0, NULL }
 };
 
@@ -427,6 +481,37 @@ static int hf_bmpv4_tlv_value_string;
 static int hf_bmpv4_tlv_value_bool;
 static int hf_bmpv4_tlv_value_index;
 static int hf_bmpv4_tlv_group_id;
+static int hf_bmpv4_tlv_path_status_status = -1;
+static int hf_bmpv4_tlv_path_status_reason = -1;
+
+// static int hf_bmp_path_status_reserved = -1;
+static int hf_bmp_path_status_invalid = -1;
+static int hf_bmp_path_status_best = -1;
+static int hf_bmp_path_status_non_selected = -1;
+static int hf_bmp_path_status_primary = -1;
+static int hf_bmp_path_status_backup = -1;
+static int hf_bmp_path_status_non_installed = -1;
+static int hf_bmp_path_status_best_external = -1;
+static int hf_bmp_path_status_addpath = -1;
+static int hf_bmp_path_status_filtered_in = -1;
+static int hf_bmp_path_status_filtered_out = -1;
+static int hf_bmp_path_status_invalid_rov = -1;
+
+static int * const hf_bmpv4_tlv_path_status[] = {
+        //&hf_bmp_path_status_reserved,
+        &hf_bmp_path_status_invalid,
+        &hf_bmp_path_status_best,
+        &hf_bmp_path_status_non_selected,
+        &hf_bmp_path_status_primary,
+        &hf_bmp_path_status_backup,
+        &hf_bmp_path_status_non_installed,
+        &hf_bmp_path_status_best_external,
+        &hf_bmp_path_status_addpath,
+        &hf_bmp_path_status_filtered_in,
+        &hf_bmp_path_status_filtered_out,
+        &hf_bmp_path_status_invalid_rov,
+        NULL
+};
 
 static int ett_bmp;
 static int ett_bmp_route_monitoring;
@@ -450,6 +535,8 @@ static int ett_bmp_route_policy_tlv_policy_flags;
 static int ett_bmp_route_policy_tlv_policy;
 static int ett_bmpv4_tlv;
 static int ett_bmpv4_tlv_value;
+static int ett_bmpv4_tlv_path_status = -1;
+
 
 static expert_field ei_stat_data_unknown;
 static expert_field ei_bmpv4_tlv_wrong_cap_size;
@@ -557,12 +644,26 @@ static void bmpv4_dissect_tlvs(proto_tree *tree, tvbuff_t *tvb, int offset, pack
             }
             case BMPv4_TLV_TYPE_VRF_TABLE_NAME: {
 
-                proto_item *ti = proto_tree_add_item(tlv_tree, hf_bmpv4_tlv_value_string, tvb, offset, tlv.length, ENC_ASCII);
-                offset += tlv.length;
+              proto_item *ti = proto_tree_add_item(tlv_tree, hf_bmpv4_tlv_value_string, tvb, offset, tlv.length,
+                                                   ENC_ASCII);
+              offset += tlv.length;
 
-                if (tlv.length == 0 || tlv.length > BMPv4_TLV_LENGTH_VRF_TABLE_NAME_MAX_LENGTH) {
-                    expert_add_info(pinfo, ti, &ei_bmpv4_tlv_string_bad_length);
-                }
+              if (tlv.length == 0 || tlv.length > BMPv4_TLV_LENGTH_VRF_TABLE_NAME_MAX_LENGTH) {
+                expert_add_info(pinfo, ti, &ei_bmpv4_tlv_string_bad_length);
+              }
+              break;
+            }
+            case BMPv4_TLV_TYPE_BGP_PATH_STATUS: {
+                bool has_reason = tlv.length > BMPv4_TLV_LENGTH_PATH_STATUS_STATUS_LENGTH;
+
+                proto_tree_add_bitmask(tlv_tree, tvb, offset, hf_bmpv4_tlv_path_status_status, ett_bmpv4_tlv_path_status, hf_bmpv4_tlv_path_status, ENC_ASCII);
+                offset += BMPv4_TLV_LENGTH_PATH_STATUS_STATUS_LENGTH;
+
+                if (!has_reason)
+                    break;
+
+                proto_tree_add_item(tlv_tree, hf_bmpv4_tlv_path_status_reason, tvb, offset, BMPv4_TLV_LENGTH_PATH_STATUS_REASON_LENGTH, ENC_ASCII);
+                offset += BMPv4_TLV_LENGTH_PATH_STATUS_REASON_LENGTH;
                 break;
             }
             case BMPv4_TLV_TYPE_BGP_CAP_ADDPATH:
@@ -1926,7 +2027,7 @@ proto_register_bmp(void)
                   NULL, 0x0, NULL, HFILL }},
         { &hf_bmpv4_tlv_type,
                 { "Type", "bmp.tlv.type", FT_UINT16, BASE_DEC,
-                  NULL, 0x0, NULL, HFILL }},
+                  VALS(bmpv4_tlv_typevals), 0x0, NULL, HFILL }},
         { &hf_bmpv4_tlv_length,
                 { "Length", "bmp.tlv.length", FT_UINT16, BASE_DEC,
                   NULL, 0x0, NULL, HFILL }},
@@ -1948,6 +2049,48 @@ proto_register_bmp(void)
         { &hf_bmpv4_tlv_group_id,
                 { "Group ID", "bmp.tlv.group_id", FT_UINT16, BASE_DEC,
                         NULL, 0x0, NULL, HFILL }},
+        { &hf_bmpv4_tlv_path_status_status,
+                { "Status", "bmp.tlv.value.path_status.status", FT_UINT32, BASE_HEX,
+                        NULL, BMP_PEER_FLAG_MASK, NULL, HFILL }},
+        { &hf_bmpv4_tlv_path_status_reason,
+                { "Reason", "bmp.tlv.value.path_status.reason", FT_UINT16, BASE_HEX,
+                        VALS(bmpv4_tlv_path_status_reason_typevals), 0x0, NULL, HFILL }},
+/*        { &hf_bmp_path_status_reserved,
+                { "reserved", "bmp.tlv.value.path_status.reserved", FT_BOOLEAN, 8,
+                        TFS(&tfs_set_notset), bmp_path_status_reserved, NULL, HFILL}},*/
+        { &hf_bmp_path_status_invalid,
+                { "invalid", "bmp.tlv.value.path_status.invalid", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_invalid, NULL, HFILL}},
+        { &hf_bmp_path_status_best,
+                { "best", "bmp.tlv.value.path_status.best", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_best, NULL, HFILL}},
+        { &hf_bmp_path_status_non_selected,
+                { "non_selected", "bmp.tlv.value.path_status.non_selected", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_non_selected, NULL, HFILL}},
+        { &hf_bmp_path_status_primary,
+                { "primary", "bmp.tlv.value.path_status.primary", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_primary, NULL, HFILL}},
+        { &hf_bmp_path_status_backup,
+                { "backup", "bmp.tlv.value.path_status.backup", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_backup, NULL, HFILL}},
+        { &hf_bmp_path_status_non_installed,
+                { "non_installed", "bmp.tlv.value.path_status.non_installed", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_non_installed, NULL, HFILL}},
+        { &hf_bmp_path_status_best_external,
+                { "best_external", "bmp.tlv.value.path_status.best_external", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_best_external, NULL, HFILL}},
+        { &hf_bmp_path_status_addpath,
+                { "addpath", "bmp.tlv.value.path_status.addpath", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_addpath, NULL, HFILL}},
+        { &hf_bmp_path_status_filtered_in,
+                { "filtered_in", "bmp.tlv.value.path_status.filtered_in", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_filtered_in, NULL, HFILL}},
+        { &hf_bmp_path_status_filtered_out,
+                { "filtered_out", "bmp.tlv.value.path_status.filtered_out", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_filtered_out, NULL, HFILL}},
+        { &hf_bmp_path_status_invalid_rov,
+                { "invalid_rov", "bmp.tlv.value.path_status.invalid_rov", FT_BOOLEAN, 11,
+                        TFS(&tfs_set_notset), bmp_path_status_invalid_rov, NULL, HFILL}},
     };
 
     /* Setup protocol subtree array */
@@ -1974,6 +2117,7 @@ proto_register_bmp(void)
         &ett_bmp_route_policy_tlv_policy,
         &ett_bmpv4_tlv,
         &ett_bmpv4_tlv_value,
+        &ett_bmpv4_tlv_path_status,
     };
 
     static ei_register_info ei[] = {
