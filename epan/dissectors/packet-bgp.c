@@ -10806,11 +10806,12 @@ example 2
     }
 }
 
-static int
+int
 dissect_bgp_pdu(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
                 void *data)
 {
-    gboolean      *first = (gboolean *)data;
+    struct bgp_dissector_opt *opt = (struct bgp_dissector_opt *)data;
+    gboolean      *first = &opt->first_time;
     guint16       bgp_len;          /* Message length             */
     guint8        bgp_type;         /* Message type               */
     const char    *typ;             /* Message type (string)      */
@@ -10902,6 +10903,10 @@ dissect_bgp_pdu(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
     default:
         break;
     }
+
+    /* report the amount of bytes consumed by the dissector */
+    opt->consumed += bgp_len;
+
     return tvb_captured_length(tvb);
 }
 
@@ -10972,8 +10977,12 @@ dissect_bgp(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data _U_)
     /*
      * Now process the BGP packets in the TCP payload.
      */
+    struct bgp_dissector_opt opt = {
+            .first_time = first,
+            .consumed = 0
+    };
     tcp_dissect_pdus(this_tvb, pinfo, tree, bgp_desegment, BGP_HEADER_SIZE,
-                     get_bgp_len, dissect_bgp_pdu, (void *)&first);
+                     get_bgp_len, dissect_bgp_pdu, (void *)(data ? data : &opt));
     return tvb_captured_length(tvb);
 }
 

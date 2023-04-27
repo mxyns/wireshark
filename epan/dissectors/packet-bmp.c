@@ -24,6 +24,7 @@
 
 #include "packet-tcp.h"
 #include "packet-bgp.h"
+#include "exceptions.h"
 
 void proto_register_bmp(void);
 void proto_reg_handoff_bmp(void);
@@ -370,6 +371,20 @@ static dissector_handle_t dissector_bgp;
 /* desegmentation */
 static gboolean bmp_desegment = TRUE;
 
+static int call_bgp_dissector(int pdu_count, tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree) {
+
+     struct bgp_dissector_opt opt = {
+            .first_time = TRUE,
+            .consumed = 0,
+    };
+
+    for (; pdu_count > 0; pdu_count--) {
+        dissect_bgp_pdu(tvb_new_subset_remaining(tvb, opt.consumed), pinfo, tree, (void *)&opt);
+    }
+
+    return opt.consumed;
+}
+
 
 /*
  * Dissect BMP Peer Down Notification
@@ -396,7 +411,7 @@ dissect_bmp_peer_down_notification(tvbuff_t *tvb, proto_tree *tree, packet_info 
         if (down_reason == BMP_PEER_DOWN_LOCAL_NO_NOTIFY) {
             proto_tree_add_item(tree, hf_peer_down_data, tvb, offset, 2, ENC_NA);
         } else {
-            call_dissector(dissector_bgp, tvb_new_subset_remaining(tvb, offset), pinfo, tree);
+            offset += call_bgp_dissector(1, tvb_new_subset_remaining(tvb, offset), pinfo, tree);
         }
     }
 }
@@ -438,7 +453,7 @@ dissect_bmp_peer_up_notification(tvbuff_t *tvb, proto_tree *tree, packet_info *p
     proto_tree_add_item(tree, hf_peer_up_remote_port, tvb, offset, 2, ENC_BIG_ENDIAN);
     offset += 2;
 
-    call_dissector(dissector_bgp, tvb_new_subset_remaining(tvb, offset), pinfo, tree);
+    offset += call_bgp_dissector(2, tvb_new_subset_remaining(tvb, offset), pinfo, tree);
 }
 
 /*
@@ -701,8 +716,10 @@ dissect_bmp_peer_header(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo, int
     proto_tree_add_item(subtree, hf_peer_asn, tvb, offset, 4, ENC_BIG_ENDIAN);
     offset += 4;
 
+    printf("before crash\n");
     proto_tree_add_item(subtree, hf_peer_bgp_id, tvb, offset, 4, ENC_BIG_ENDIAN);
     offset += 4;
+    printf("after crash\n");
 
     proto_tree_add_item(subtree, hf_peer_timestamp_sec, tvb, offset, 4, ENC_BIG_ENDIAN);
     offset += 4;
@@ -710,10 +727,12 @@ dissect_bmp_peer_header(tvbuff_t *tvb, proto_tree *tree, packet_info *pinfo, int
     proto_tree_add_item(subtree, hf_peer_timestamp_msec, tvb, offset, 4, ENC_BIG_ENDIAN);
     offset += 4;
 
+    printf("message type %d\n", bmp_type);
+
     switch (bmp_type) {
         case BMP_MSG_TYPE_ROUTE_MONITORING:
         case BMP_MSG_TYPE_ROUTE_MIRRORING:
-            call_dissector(dissector_bgp, tvb_new_subset_remaining(tvb, offset), pinfo, tree);
+            call_bgp_dissector(1, tvb_new_subset_remaining(tvb, offset), pinfo, tree);
             break;
         case BMP_MSG_TYPE_STAT_REPORT:
             dissect_bmp_stat_report(tvb, tree, pinfo, offset, flags);
@@ -1086,6 +1105,9 @@ dissect_bmp_pdu(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, void* data 
     col_clear(pinfo->cinfo, COL_INFO);
 
     bmp_type = tvb_get_guint8(tvb, 5);
+
+    printf("reported length %d\n", tvb_reported_length_remaining(tvb, offset));
+    printf("captured length %d\n", tvb_captured_length_remaining(tvb, offset));
 
     col_add_fstr(pinfo->cinfo, COL_INFO, "Type: %s",
             val_to_str(bmp_type, bmp_typevals, "Unknown (0x%02x)"));

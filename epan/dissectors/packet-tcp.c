@@ -4845,6 +4845,7 @@ tcp_dissect_pdus(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
              *
              * Report this as a bounds error.
              */
+            // printf("will show bounds error\n");
             show_reported_bounds_error(tvb, pinfo, tree);
             return;
         }
@@ -4865,10 +4866,12 @@ tcp_dissect_pdus(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
         /*
          * Can we do reassembly?
          */
+        // printf("proto_desegment %d pinfo->can_desegment %d\n", (int)proto_desegment, (int)pinfo->can_desegment);
         if (proto_desegment && pinfo->can_desegment) {
             /*
              * Yes - is the PDU split across segment boundaries?
              */
+            // printf("can desegment, captured is %d requested is %d\n", captured_length_remaining, plen);
             if (captured_length_remaining < plen) {
                 /*
                  * Yes.  Tell the TCP dissector where the data for this message
@@ -4922,6 +4925,7 @@ tcp_dissect_pdus(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
                  * we throw FragmentBoundsError instead of malformed
                  * errors.
                  */
+                // printf("set to fragmented");
                 tvb_set_fragment(next_tvb);
             }
         }

@@ -11,6 +11,16 @@
 #ifndef __PACKET_BGP_H__
 #define __PACKET_BGP_H__
 
+struct bgp_dissector_opt {
+    gboolean first_time;
+    int consumed;
+};
+
+
+int
+dissect_bgp_pdu(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree,
+                void *data);
+
 const char*
 decode_bgp_rd(wmem_allocator_t *pool, tvbuff_t *tvb, gint offset);
 
